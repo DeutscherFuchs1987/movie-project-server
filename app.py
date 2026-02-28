@@ -4,16 +4,12 @@ import json
 import os
 from datetime import datetime
 
-
 app = Flask(__name__)
 CORS(app)  # Разрешаем запросы с GitHub Pages
 
-
 JSON_FILE = 'projects.json'
 
-
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
-
 
 def load_data():
     """Загружает данные из JSON-файла"""
@@ -25,15 +21,12 @@ def load_data():
             return []
     return []
 
-
 def save_data(data):
     """Сохраняет данные в JSON-файл"""
     with open(JSON_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-
 # ========== МАРШРУТЫ API ==========
-
 
 @app.route('/', methods=['GET'])
 def home():
@@ -51,12 +44,10 @@ def home():
         }
     })
 
-
 @app.route('/projects', methods=['GET'])
 def get_projects():
     """Получить все проекты"""
     return jsonify(load_data())
-
 
 @app.route('/watched', methods=['GET'])
 def get_watched_projects():
@@ -64,7 +55,6 @@ def get_watched_projects():
     data = load_data()
     watched = [p for p in data if p.get('watched') == True]
     return jsonify(watched)
-
 
 @app.route('/projects/<project_id>', methods=['GET'])
 def get_project(project_id):
@@ -74,7 +64,6 @@ def get_project(project_id):
     if project:
         return jsonify(project)
     return jsonify({'error': 'Проект не найден'}), 404
-
 
 @app.route('/projects', methods=['POST'])
 def add_project():
@@ -121,7 +110,6 @@ def add_project():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/projects/<project_id>', methods=['PUT'])
 def update_project(project_id):
     """Обновить существующий проект"""
@@ -150,7 +138,6 @@ def update_project(project_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/projects/<project_id>', methods=['DELETE'])
 def delete_project(project_id):
     """Удалить проект"""
@@ -165,7 +152,6 @@ def delete_project(project_id):
         })
     
     return jsonify({'error': 'Проект не найден'}), 404
-
 
 @app.route('/projects/<project_id>/ratings', methods=['PUT'])
 def update_ratings(project_id):
@@ -198,7 +184,6 @@ def update_ratings(project_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/stats', methods=['GET'])
 def get_stats():
     """Получить статистику по проектам"""
@@ -220,7 +205,6 @@ def get_stats():
         'by_type': types
     })
 
-
 @app.route('/reset', methods=['POST'])
 def reset_data():
     """Сбросить все данные (только для разработки)"""
@@ -228,7 +212,6 @@ def reset_data():
         save_data([])
         return jsonify({'status': 'ok', 'message': 'Данные сброшены'})
     return jsonify({'error': 'Доступ запрещён'}), 403
-
 
 if __name__ == '__main__':
     # Создаём пустой JSON-файл при первом запуске
