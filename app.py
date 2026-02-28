@@ -1,231 +1,126 @@
+import os
+import json
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import json
-import os
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)  # Разрешаем запросы с GitHub Pages
+CORS(app)
 
-JSON_FILE = 'projects.json'
+# Твоя строка подключения (временно вставь сюда для теста)
+DATABASE_URL = "postgresql://movie_project_db_oyjk_user:1T4CAHsiyFOMxhUF0XFUFa5VHECN81dN@dpg-d6hf7hrh46gs73e6a2d0-a.oregon-postgres.render.com/movie_project_db_oyjk"
 
-# ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+def get_db_connection():
+    """Создает подключение к базе данных"""
+    return psycopg2.connect(DATABASE_URL)
 
-def load_data():
-    """Загружает данные из JSON-файла"""
-    if os.path.exists(JSON_FILE):
-        try:
-            with open(JSON_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
+def init_db():
+    """Создает таблицу при первом запуске"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            data JSONB NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("✅ База данных готова")
 
-def save_data(data):
-    """Сохраняет данные в JSON-файл"""
-    with open(JSON_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+# Инициализируем при старте
+init_db()
 
-# ========== МАРШРУТЫ API ==========
-
-@app.route('/', methods=['GET'])
+@app.route('/')
 def home():
-    """Главная страница для проверки работы сервера"""
     return jsonify({
         'status': 'ok',
-        'message': 'Сервер проектов работает!',
-        'endpoints': {
-            'GET /projects': 'Получить все проекты',
-            'POST /projects': 'Добавить новый проект',
-            'GET /projects/<id>': 'Получить проект по ID',
-            'PUT /projects/<id>': 'Обновить проект',
-            'DELETE /projects/<id>': 'Удалить проект',
-            'GET /watched': 'Получить только просмотренные проекты'
-        }
+        'message': 'Сервер работает с PostgreSQL!',
+        'database': '✅ PostgreSQL подключен'
     })
 
 @app.route('/projects', methods=['GET'])
 def get_projects():
-    """Получить все проекты"""
-    return jsonify(load_data())
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT data FROM projects ORDER BY created_at DESC")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify([row['data'] for row in rows])
 
 @app.route('/watched', methods=['GET'])
-def get_watched_projects():
-    """Получить только просмотренные проекты (для страницы оценок)"""
-    data = load_data()
-    watched = [p for p in data if p.get('watched') == True]
-    return jsonify(watched)
-
-@app.route('/projects/<project_id>', methods=['GET'])
-def get_project(project_id):
-    """Получить конкретный проект по ID"""
-    data = load_data()
-    project = next((p for p in data if p['id'] == project_id), None)
-    if project:
-        return jsonify(project)
-    return jsonify({'error': 'Проект не найден'}), 404
+def get_watched():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT data FROM projects WHERE data->>'watched' = 'true'")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify([row['data'] for row in rows])
 
 @app.route('/projects', methods=['POST'])
 def add_project():
-    """Добавить новый проект"""
-    try:
-        new_project = request.json
-        
-        # Проверяем обязательные поля
-        if not new_project.get('id'):
-            return jsonify({'error': 'Отсутствует ID проекта'}), 400
-        
-        # Добавляем поля по умолчанию, если их нет
-        if 'watched' not in new_project:
-            new_project['watched'] = False
-        if 'inProgress' not in new_project:
-            new_project['inProgress'] = False
-        if 'ratings' not in new_project:
-            new_project['ratings'] = {
-                'senya': None,
-                'vanya': None,
-                'pasha': None,
-                'volodya': None
-            }
-        if 'notes' not in new_project:
-            new_project['notes'] = ''
-        if 'watchedDate' not in new_project:
-            new_project['watchedDate'] = None
-        
-        data = load_data()
-        
-        # Проверяем, нет ли уже такого проекта
-        if any(p['id'] == new_project['id'] for p in data):
-            return jsonify({'error': 'Проект с таким ID уже существует'}), 409
-        
-        data.append(new_project)
-        save_data(data)
-        
-        return jsonify({
-            'status': 'ok',
-            'message': 'Проект добавлен',
-            'project': new_project
-        }), 201
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    data = request.json
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Проверяем существование
+    cur.execute("SELECT id FROM projects WHERE id = %s", (data['id'],))
+    if cur.fetchone():
+        cur.close()
+        conn.close()
+        return jsonify({'error': 'Проект уже есть'}), 409
+    
+    cur.execute(
+        "INSERT INTO projects (id, data) VALUES (%s, %s)",
+        (data['id'], json.dumps(data))
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({'status': 'ok'}), 201
 
 @app.route('/projects/<project_id>', methods=['PUT'])
 def update_project(project_id):
-    """Обновить существующий проект"""
-    try:
-        updates = request.json
-        data = load_data()
-        
-        for i, project in enumerate(data):
-            if project['id'] == project_id:
-                # Обновляем только переданные поля
-                data[i].update(updates)
-                
-                # Если фильм помечен как просмотренный и нет даты, добавляем её
-                if updates.get('watched') == True and not data[i].get('watchedDate'):
-                    data[i]['watchedDate'] = datetime.now().strftime('%Y-%m-%d')
-                
-                save_data(data)
-                return jsonify({
-                    'status': 'ok',
-                    'message': 'Проект обновлён',
-                    'project': data[i]
-                })
-        
-        return jsonify({'error': 'Проект не найден'}), 404
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    updates = request.json
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT data FROM projects WHERE id = %s", (project_id,))
+    row = cur.fetchone()
+    if not row:
+        return jsonify({'error': 'Не найден'}), 404
+    
+    current = row[0]
+    current.update(updates)
+    
+    cur.execute(
+        "UPDATE projects SET data = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+        (json.dumps(current), project_id)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({'status': 'ok'})
 
 @app.route('/projects/<project_id>', methods=['DELETE'])
 def delete_project(project_id):
-    """Удалить проект"""
-    data = load_data()
-    new_data = [p for p in data if p['id'] != project_id]
-    
-    if len(new_data) < len(data):
-        save_data(new_data)
-        return jsonify({
-            'status': 'ok',
-            'message': 'Проект удалён'
-        })
-    
-    return jsonify({'error': 'Проект не найден'}), 404
-
-@app.route('/projects/<project_id>/ratings', methods=['PUT'])
-def update_ratings(project_id):
-    """Обновить только оценки проекта"""
-    try:
-        ratings = request.json
-        data = load_data()
-        
-        for i, project in enumerate(data):
-            if project['id'] == project_id:
-                if 'ratings' not in data[i]:
-                    data[i]['ratings'] = {}
-                data[i]['ratings'].update(ratings)
-                
-                # Автоматически помечаем как просмотренное, если есть хотя бы одна оценка
-                has_rating = any(v is not None for v in data[i]['ratings'].values())
-                if has_rating and not data[i].get('watched'):
-                    data[i]['watched'] = True
-                    data[i]['watchedDate'] = datetime.now().strftime('%Y-%m-%d')
-                
-                save_data(data)
-                return jsonify({
-                    'status': 'ok',
-                    'message': 'Оценки обновлены',
-                    'ratings': data[i]['ratings']
-                })
-        
-        return jsonify({'error': 'Проект не найден'}), 404
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/stats', methods=['GET'])
-def get_stats():
-    """Получить статистику по проектам"""
-    data = load_data()
-    total = len(data)
-    watched = len([p for p in data if p.get('watched')])
-    in_progress = len([p for p in data if p.get('inProgress')])
-    
-    # Статистика по типам
-    types = {}
-    for p in data:
-        t = p.get('type', 'Фильм')
-        types[t] = types.get(t, 0) + 1
-    
-    return jsonify({
-        'total': total,
-        'watched': watched,
-        'in_progress': in_progress,
-        'by_type': types
-    })
-
-@app.route('/reset', methods=['POST'])
-def reset_data():
-    """Сбросить все данные (только для разработки)"""
-    if app.debug:  # Только в режиме отладки
-        save_data([])
-        return jsonify({'status': 'ok', 'message': 'Данные сброшены'})
-    return jsonify({'error': 'Доступ запрещён'}), 403
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
-    # Создаём пустой JSON-файл при первом запуске
-    if not os.path.exists(JSON_FILE):
-        save_data([])
-        print(f"Создан пустой файл {JSON_FILE}")
-    
-    print("Сервер запущен! Доступные маршруты:")
-    print("  GET  /         - информация о сервере")
-    print("  GET  /projects - все проекты")
-    print("  GET  /watched  - только просмотренные")
-    print("  POST /projects - добавить проект")
-    print("  PUT  /projects/<id> - обновить проект")
-    print("  DELETE /projects/<id> - удалить проект")
-    print("  GET  /stats    - статистика")
-    
+    print("🚀 Сервер PostgreSQL запущен")
     app.run(debug=True, host='0.0.0.0', port=5000)
